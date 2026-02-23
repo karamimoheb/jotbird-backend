@@ -159,7 +159,7 @@ async function handlePublish(request: Request, env: Env, url: URL): Promise<Resp
       .run();
   }
 
-  const ttlDays = EXPIRE_DAYS; // or compute from expireAt
+  const ttlDays = EXPIRE_DAYS;
 
   return json(
     {
@@ -268,7 +268,7 @@ function extractTitle(markdown: string): string | null {
 }
 
 /* ============================= */
-/* MARKDOWN → HTML (MODERN RENDERER) */
+/* MARKDOWN → HTML (MODERN RENDERER with floating menu) */
 /* ============================= */
 
 function buildHtml(markdown: string) {
@@ -617,63 +617,115 @@ hr{
 }
 
 /* ============================= */
-/* TOOLBAR */
+/* FLOATING MENU (bottom left, collapsible) */
 /* ============================= */
 
-.toolbar{
-  position:fixed;
-  top:20px;
-  left:20px;
-  display:flex;
-  gap:8px;
-  z-index:1000;
-  flex-wrap:wrap;
+.floating-menu {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.btn{
-  padding:10px 18px;
-  border:none;
-  border-radius:10px;
-  cursor:pointer;
-  background:var(--card);
-  color:var(--text);
-  font-weight:600;
-  font-size:0.9rem;
-  box-shadow:var(--shadow);
-  transition:all 0.2s ease;
-  border:1px solid var(--border);
-  font-family:inherit;
+.menu-toggle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  transition: all 0.2s ease;
 }
 
-.btn:hover{
-  transform:translateY(-2px);
-  box-shadow:var(--shadow-lg);
-  background:var(--accent);
-  color:white;
-  border-color:var(--accent);
+.menu-toggle:hover {
+  transform: scale(1.05);
+  background: var(--accent);
+  color: white;
 }
 
-.btn:active{
-  transform:translateY(0);
+.menu-items {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
 }
 
-@media(max-width:600px){
-  body{padding:80px 16px 40px;}
-  h1{font-size:2rem;}
-  h2{font-size:1.75rem;}
-  pre{font-size:0.8rem;}
-  blockquote{padding:1rem 1.25rem;}
-  .toolbar{top:auto;bottom:20px;left:50%;transform:translateX(-50%);justify-content:center;}
+.floating-menu.open .menu-items {
+  display: flex;
+}
+
+/* Reuse existing .btn styles for menu buttons */
+.btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: var(--shadow);
+  transition: all 0.2s ease;
+  border: 1px solid var(--border);
+  font-family: inherit;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+/* Mobile adjustment */
+@media (max-width: 600px) {
+  body {
+    padding: 80px 16px 40px;
+  }
+  h1 {
+    font-size: 2rem;
+  }
+  h2 {
+    font-size: 1.75rem;
+  }
+  pre {
+    font-size: 0.8rem;
+  }
+  blockquote {
+    padding: 1rem 1.25rem;
+  }
+  .floating-menu {
+    bottom: 20px;
+    left: 20px;
+  }
 }
 </style>
 
 </head>
 <body>
 
-<div class="toolbar">
-<button class="btn" onclick="copyMarkdown()">📋 کپی Markdown</button>
-<button class="btn" onclick="copyHTML()">🌐 کپی HTML</button>
-<button class="btn" onclick="copyLink()">🔗 کپی لینک</button>
+<!-- Floating collapsible menu -->
+<div class="floating-menu" id="floatingMenu">
+  <button class="menu-toggle" id="menuToggle" aria-label="Menu">⋯</button>
+  <div class="menu-items">
+    <button class="btn" onclick="copyMarkdown()">📋 کپی Markdown</button>
+    <button class="btn" onclick="copyHTML()">🌐 کپی HTML</button>
+    <button class="btn" onclick="copyLink()">🔗 کپی لینک</button>
+  </div>
 </div>
 
 <div id="content">
@@ -718,6 +770,14 @@ function showToast(message){
   document.body.appendChild(toast);
   setTimeout(()=>toast.remove(),2000);
 }
+
+// Toggle floating menu
+document.getElementById('menuToggle').addEventListener('click', function(e) {
+  e.stopPropagation();
+  document.getElementById('floatingMenu').classList.toggle('open');
+});
+
+// Optional: close menu when clicking outside (if needed) – not implemented for simplicity
 
 // Add slideUp animation
 const style = document.createElement('style');
