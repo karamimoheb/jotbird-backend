@@ -16,56 +16,33 @@ export default {
       await ensureTable(env);
       const url = new URL(request.url);
 
+      // Health check
       if (url.pathname === "/health") {
         return json({ status: "ok" });
       }
 
+      // Legacy publish (create only)
       if (url.pathname === "/publish" && request.method === "POST") {
-        const body = await safeJson(request);
-        if (!body?.markdown) {
-          return json({ error: "markdown required" }, 400);
-        }
-
-        const id = crypto.randomUUID();
-        const expireAt = Date.now() + EXPIRE_DAYS * 86400000;
-
-        const html = buildHtml(body.markdown);
-
-        await env.DB.prepare(
-          "INSERT INTO posts (id, html, expire_at) VALUES (?, ?, ?)"
-        )
-          .bind(id, html, expireAt)
-          .run();
-
-        return json({
-          success: true,
-          url: `${url.origin}/p/${id}`,
-          expireAt,
-        });
+        return handleLegacyPublish(request, env, url);
       }
 
+      // View document
       if (url.pathname.startsWith("/p/")) {
-        const id = url.pathname.replace("/p/", "");
+        return handleViewDocument(request, env);
+      }
 
-        const result = await env.DB.prepare(
-          "SELECT html, expire_at FROM posts WHERE id = ?"
-        )
-          .bind(id)
-          .first();
+      // ----- New API endpoints (v1) -----
+      if (url.pathname === "/api/v1/publish" && request.method === "POST") {
+        return handlePublish(request, env, url);
+      }
 
-        if (!result) return new Response("Not Found", { status: 404 });
-
-        if (Date.now() > Number(result.expire_at)) {
-          await env.DB.prepare("DELETE FROM posts WHERE id = ?")
-            .bind(id)
-            .run();
-
-          return new Response("Expired", { status: 410 });
+      if (url.pathname === "/api/v1/documents") {
+        if (request.method === "GET") {
+          return handleListDocuments(request, env, url);
         }
-
-        return new Response(result.html, {
-          headers: { "Content-Type": "text/html; charset=UTF-8" },
-        });
+        if (request.method === "DELETE") {
+          return handleDeleteDocument(request, env);
+        }
       }
 
       return new Response("Not Found", { status: 404 });
@@ -77,10 +54,175 @@ export default {
 };
 
 /* ============================= */
-/* AUTO TABLE */
+/* LEGACY PUBLISH (create only) */
+/* ============================= */
+async function handleLegacyPublish(request: Request, env: Env, url: URL): Promise<Response> {
+  const body = await safeJson(request);
+  if (!body?.markdown) {
+    return json({ error: "markdown required" }, 400);
+  }
+
+  const id = crypto.randomUUID();
+  const expireAt = Date.now() + EXPIRE_DAYS * 86400000;
+  const title = extractTitle(body.markdown) || "Untitled";
+  const html = buildHtml(body.markdown);
+
+  await env.DB.prepare(
+    "INSERT INTO posts (id, html, title, expire_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)"
+  )
+    .bind(id, html, title, expireAt, Date.now(), "api")
+    .run();
+
+  return json({
+    success: true,
+    url: `${url.origin}/p/${id}`,
+    expireAt,
+  });
+}
+
+/* ============================= */
+/* VIEW DOCUMENT */
+/* ============================= */
+async function handleViewDocument(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const id = url.pathname.replace("/p/", "");
+
+  const result = await env.DB.prepare(
+    "SELECT html, expire_at FROM posts WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ html: string; expire_at: number }>();
+
+  if (!result) return new Response("Not Found", { status: 404 });
+
+  if (Date.now() > Number(result.expire_at)) {
+    await env.DB.prepare("DELETE FROM posts WHERE id = ?").bind(id).run();
+    return new Response("Expired", { status: 410 });
+  }
+
+  return new Response(result.html, {
+    headers: { "Content-Type": "text/html; charset=UTF-8" },
+  });
+}
+
+/* ============================= */
+/* PUBLISH (create or update) */
+/* ============================= */
+async function handlePublish(request: Request, env: Env, url: URL): Promise<Response> {
+  const body = await safeJson(request);
+  if (!body?.markdown) {
+    return json({ error: "Missing markdown field" }, 400);
+  }
+
+  const providedSlug = body.slug;
+  const now = Date.now();
+  const expireAt = now + EXPIRE_DAYS * 86400000;
+  const title = body.title || extractTitle(body.markdown) || "Untitled";
+  const html = buildHtml(body.markdown);
+  const source = "api";
+
+  let slug: string;
+  let created: boolean;
+
+  if (providedSlug) {
+    // Check if slug exists
+    const existing = await env.DB.prepare("SELECT id FROM posts WHERE id = ?")
+      .bind(providedSlug)
+      .first();
+    if (existing) {
+      // Update
+      slug = providedSlug;
+      created = false;
+      await env.DB.prepare(
+        "UPDATE posts SET html = ?, title = ?, expire_at = ?, updated_at = ? WHERE id = ?"
+      )
+        .bind(html, title, expireAt, now, slug)
+        .run();
+    } else {
+      // Slug not found – create new (ignore provided slug)
+      slug = crypto.randomUUID();
+      created = true;
+      await env.DB.prepare(
+        "INSERT INTO posts (id, html, title, expire_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+        .bind(slug, html, title, expireAt, now, source)
+        .run();
+    }
+  } else {
+    // No slug – create new
+    slug = crypto.randomUUID();
+    created = true;
+    await env.DB.prepare(
+      "INSERT INTO posts (id, html, title, expire_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+      .bind(slug, html, title, expireAt, now, source)
+      .run();
+  }
+
+  const ttlDays = EXPIRE_DAYS; // or compute from expireAt
+
+  return json(
+    {
+      slug,
+      url: `${url.origin}/p/${slug}`,
+      title,
+      expiresAt: new Date(expireAt).toISOString(),
+      ttlDays,
+      created,
+    },
+    created ? 201 : 200
+  );
+}
+
+/* ============================= */
+/* LIST DOCUMENTS */
+/* ============================= */
+async function handleListDocuments(request: Request, env: Env, url: URL): Promise<Response> {
+  const results = await env.DB.prepare(
+    "SELECT id, title, source, updated_at, expire_at FROM posts ORDER BY updated_at DESC"
+  ).all();
+
+  const documents = results.results.map((row: any) => ({
+    slug: row.id,
+    title: row.title,
+    url: `${url.origin}/p/${row.id}`,
+    source: row.source || "api",
+    updatedAt: new Date(row.updated_at).toISOString(),
+    expiresAt: new Date(row.expire_at).toISOString(),
+  }));
+
+  return json({ documents });
+}
+
+/* ============================= */
+/* DELETE DOCUMENT */
+/* ============================= */
+async function handleDeleteDocument(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const slug = url.searchParams.get("slug");
+
+  if (!slug) {
+    return json({ error: "Missing slug parameter" }, 400);
+  }
+
+  const existing = await env.DB.prepare("SELECT id FROM posts WHERE id = ?")
+    .bind(slug)
+    .first();
+  if (!existing) {
+    return json({ error: "Document not found" }, 404);
+  }
+
+  await env.DB.prepare("DELETE FROM posts WHERE id = ?").bind(slug).run();
+
+  return json({ ok: true });
+}
+
+/* ============================= */
+/* AUTO TABLE (with schema upgrades) */
 /* ============================= */
 
 async function ensureTable(env: Env) {
+  // Create table if not exists (minimal columns)
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS posts (
       id TEXT PRIMARY KEY,
@@ -88,6 +230,20 @@ async function ensureTable(env: Env) {
       expire_at INTEGER NOT NULL
     );
   `).run();
+
+  // Check and add missing columns (idempotent)
+  const tableInfo = await env.DB.prepare("PRAGMA table_info(posts)").all();
+  const columns = tableInfo.results.map((col: any) => col.name);
+
+  const addColumnIfMissing = async (colName: string, colDef: string) => {
+    if (!columns.includes(colName)) {
+      await env.DB.prepare(`ALTER TABLE posts ADD COLUMN ${colDef}`).run();
+    }
+  };
+
+  await addColumnIfMissing("title", "title TEXT");
+  await addColumnIfMissing("updated_at", "updated_at INTEGER");
+  await addColumnIfMissing("source", "source TEXT DEFAULT 'api'");
 }
 
 /* ============================= */
@@ -100,6 +256,15 @@ async function safeJson(req: Request) {
   } catch {
     return null;
   }
+}
+
+/* ============================= */
+/* EXTRACT TITLE FROM MARKDOWN */
+/* ============================= */
+
+function extractTitle(markdown: string): string | null {
+  const match = markdown.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : null;
 }
 
 /* ============================= */
@@ -516,7 +681,7 @@ ${renderMarkdown(escaped)}
 </div>
 
 <script>
-const rawMarkdown = \`${markdown.replace(/`/g,"\\`")}\`;
+const rawMarkdown = \`${markdown.replace(/`/g, "\\`")}\`;
 
 function copyMarkdown(){
   navigator.clipboard.writeText(rawMarkdown);
@@ -580,13 +745,13 @@ function renderMarkdown(text: string) {
   // First, handle code blocks (triple backticks)
   const codeBlockRegex = /\`\`\`(\w+)?\n([\s\S]*?)\n\`\`\`/g;
   html = html.replace(codeBlockRegex, (match, lang, code) => {
-    const language = lang || 'text';
+    const language = lang || "text";
     return `<pre><code class="language-${language}">${escapeHtml(code)}</code></pre>`;
   });
 
   // Handle blockquotes (multi-line)
   html = html.replace(/^&gt; (.*$)/gim, "<blockquote><p>$1</p></blockquote>");
-  
+
   // Merge consecutive blockquote lines
   html = html.replace(/<\/blockquote>\s*<blockquote>/g, "<br>");
 
