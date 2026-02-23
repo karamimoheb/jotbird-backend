@@ -5,7 +5,7 @@ compatibility_date = "2026-02-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "jotbird-db"
-database_id = "DATABASE_ID_HERE"
+database_id = "82afaf11-0847-47dc-9712-d1d64003993a"
 
 [triggers]
 crons = ["0 3 * * *"]
