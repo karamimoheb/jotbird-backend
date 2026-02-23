@@ -575,10 +575,11 @@ document.head.appendChild(style);
 /* ============================= */
 
 function renderMarkdown(text: string) {
+  let html = text;
+
   // First, handle code blocks (triple backticks)
-  let html = text.replace(/
-```(\w+)?\n([\s\S]*?)\n
-```/g, (match, lang, code) => {
+  const codeBlockRegex = /\`\`\`(\w+)?\n([\s\S]*?)\n\`\`\`/g;
+  html = html.replace(codeBlockRegex, (match, lang, code) => {
     const language = lang || 'text';
     return `<pre><code class="language-${language}">${escapeHtml(code)}</code></pre>`;
   });
