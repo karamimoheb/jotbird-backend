@@ -8,7 +8,7 @@ bucket_name = "jotbird-storage"
 
 [[kv_namespaces]]
 binding = "META"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "72831046ab7f49c3b2b273a6985b48e9"
 
 [triggers]
 crons = ["0 3 * * *"]
