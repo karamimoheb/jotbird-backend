@@ -2,13 +2,10 @@ name = "jotbird-backend"
 main = "src/index.ts"
 compatibility_date = "2026-02-01"
 
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "jotbird-storage"
-
-[[kv_namespaces]]
-binding = "META"
-id = "72831046ab7f49c3b2b273a6985b48e9"
+[[d1_databases]]
+binding = "DB"
+database_name = "jotbird-db"
+database_id = "DATABASE_ID_HERE"
 
 [triggers]
 crons = ["0 3 * * *"]
